@@ -48,10 +48,11 @@ public class ItemStackResponsePacketType extends Type<ItemStackResponse> {
 
     private ItemStackResponse readResponse(final ByteBuf buffer) {
         final int result = Types.BYTE.read(buffer); // result
-        final int requestId = Types.VAR_INT.read(buffer); // client request id
+        final int requestId = BedrockTypes.VAR_INT.read(buffer); // client request id
+        Types.BOOLEAN.read(buffer); // presence flag 1 (always true in vanilla serialization)
 
         List<ItemStackResponse.Container> containers = null;
-        if (result == ItemStackResponse.RESULT_OK) {
+        if (Types.BOOLEAN.read(buffer)) { // has containers
             final int containersCount = BedrockTypes.UNSIGNED_VAR_INT.read(buffer); // containers count
             containers = new ArrayList<>(containersCount);
             for (int i = 0; i < containersCount; i++) {
@@ -59,14 +60,17 @@ public class ItemStackResponsePacketType extends Type<ItemStackResponse> {
                 final int slotsCount = BedrockTypes.UNSIGNED_VAR_INT.read(buffer); // slots count
                 final List<ItemStackResponse.Slot> slots = new ArrayList<>(slotsCount);
                 for (int j = 0; j < slotsCount; j++) {
-                    final byte requestedSlot = Types.BYTE.read(buffer); // requested slot
-                    final byte slot = Types.BYTE.read(buffer); // slot
-                    final byte amount = Types.BYTE.read(buffer); // amount
-                    final int serverNetId = BedrockTypes.VAR_INT.read(buffer); // item stack net id
+                    final byte slot1 = Types.BYTE.read(buffer); // requested slot
+                    final byte slot2 = Types.BYTE.read(buffer); // actual slot
+                    final byte amount = Types.BYTE.read(buffer); // count
+                    int serverNetId = 0;
+                    if (Types.BOOLEAN.read(buffer) && Types.BOOLEAN.read(buffer)) {
+                        serverNetId = BedrockTypes.VAR_INT.read(buffer); // item stack net id (optional)
+                    }
                     final String customName = BedrockTypes.STRING.read(buffer); // custom name
-                    final String filteredCustomName = BedrockTypes.STRING.read(buffer); // filtered custom name
+                    final String filteredCustomName = Types.BOOLEAN.read(buffer) ? BedrockTypes.STRING.read(buffer) : null; // filtered custom name (optional)
                     final int durabilityCorrection = BedrockTypes.VAR_INT.read(buffer); // durability correction
-                    slots.add(new ItemStackResponse.Slot(requestedSlot, slot, amount, serverNetId, customName, filteredCustomName, durabilityCorrection));
+                    slots.add(new ItemStackResponse.Slot(slot1, slot2, amount, serverNetId, customName, filteredCustomName, durabilityCorrection));
                 }
                 containers.add(new ItemStackResponse.Container(containerName, slots));
             }
@@ -84,23 +88,36 @@ public class ItemStackResponsePacketType extends Type<ItemStackResponse> {
         BedrockTypes.UNSIGNED_VAR_INT.write(buffer, 1); // responses count
         Types.BYTE.write(buffer, (byte) response.result()); // result
         BedrockTypes.VAR_INT.write(buffer, response.requestId()); // client request id
-        if (response.result() == ItemStackResponse.RESULT_OK) {
-            BedrockTypes.UNSIGNED_VAR_INT.write(buffer, response.containers() != null ? response.containers().size() : 0); // containers count
-            if (response.containers() != null) {
-                for (ItemStackResponse.Container container : response.containers()) {
-                    BedrockTypes.FULL_CONTAINER_NAME.write(buffer, container.containerName()); // full container name
-                    BedrockTypes.UNSIGNED_VAR_INT.write(buffer, container.slots().size()); // slots count
-                    for (ItemStackResponse.Slot slot : container.slots()) {
-                        Types.BYTE.write(buffer, slot.requestedSlot()); // requested slot
-                        Types.BYTE.write(buffer, slot.slot()); // slot
-                        Types.BYTE.write(buffer, slot.amount()); // amount
+        Types.BOOLEAN.write(buffer, true); // presence flag 1
+        if (response.containers() != null && !response.containers().isEmpty()) {
+            Types.BOOLEAN.write(buffer, true); // has containers
+            BedrockTypes.UNSIGNED_VAR_INT.write(buffer, response.containers().size()); // containers count
+            for (ItemStackResponse.Container container : response.containers()) {
+                BedrockTypes.FULL_CONTAINER_NAME.write(buffer, container.containerName()); // full container name
+                BedrockTypes.UNSIGNED_VAR_INT.write(buffer, container.slots().size()); // slots count
+                for (ItemStackResponse.Slot slot : container.slots()) {
+                    Types.BYTE.write(buffer, slot.requestedSlot()); // requested slot
+                    Types.BYTE.write(buffer, slot.slot()); // actual slot
+                    Types.BYTE.write(buffer, slot.amount()); // count
+                    Types.BOOLEAN.write(buffer, true); // net id presence flag 1
+                    if (slot.serverNetId() > 0) {
+                        Types.BOOLEAN.write(buffer, true); // net id present
                         BedrockTypes.VAR_INT.write(buffer, slot.serverNetId()); // item stack net id
-                        BedrockTypes.STRING.write(buffer, slot.customName()); // custom name
-                        BedrockTypes.STRING.write(buffer, slot.filteredCustomName()); // filtered custom name
-                        BedrockTypes.VAR_INT.write(buffer, slot.durabilityCorrection()); // durability correction
+                    } else {
+                        Types.BOOLEAN.write(buffer, false); // no net id
                     }
+                    BedrockTypes.STRING.write(buffer, slot.customName()); // custom name
+                    if (slot.filteredCustomName() != null) {
+                        Types.BOOLEAN.write(buffer, true); // filtered custom name present
+                        BedrockTypes.STRING.write(buffer, slot.filteredCustomName()); // filtered custom name
+                    } else {
+                        Types.BOOLEAN.write(buffer, false); // no filtered custom name
+                    }
+                    BedrockTypes.VAR_INT.write(buffer, slot.durabilityCorrection()); // durability correction
                 }
             }
+        } else {
+            Types.BOOLEAN.write(buffer, false); // has containers
         }
     }
 

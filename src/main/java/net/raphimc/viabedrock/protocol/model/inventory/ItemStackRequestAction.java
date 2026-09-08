@@ -21,67 +21,70 @@ import net.raphimc.viabedrock.protocol.data.enums.bedrock.generated.ItemStackReq
 
 /**
  * One action inside an item stack request. The used fields depend on the action type.
+ * Wire layouts follow the CloudburstMC BedrockCodecHelper_v2168 encoder (protocol 2169).
  */
 public record ItemStackRequestAction(
         ItemStackRequestActionType type,
-        Integer amount, // Take/Place/Swap-adjacent/Drop/Destroy/Consume/PlaceInItemContainer/TakeFromItemContainer/ScreenHUDMineBlock
-        ItemStackRequestSlot source, // Take/Place/Swap/Drop/Destroy/Consume/PlaceInItemContainer/TakeFromItemContainer/ScreenHUDMineBlock/CraftCreative
+        Integer amount, // Take/Place/Drop/Destroy/Consume/PlaceInItemContainer/TakeFromItemContainer
+        ItemStackRequestSlot source, // Take/Place/Swap/Drop/Destroy/Consume/PlaceInItemContainer/TakeFromItemContainer
         ItemStackRequestSlot destination, // Take/Place/Swap/PlaceInItemContainer/TakeFromItemContainer
         Boolean throwRandomly, // Drop
-        String resultItemId, // Create
+        Integer createSlot, // Create
         Integer primaryEffect, // ScreenBeaconPayment
         Integer secondaryEffect, // ScreenBeaconPayment
-        Integer recipeNetId, // CraftRecipe/CraftRecipeAuto/CraftRecipeOptional
-        Integer timesCrafted, // CraftRecipeAuto/CraftRecipeOptional
-        String filteredString // CraftRecipeOptional
+        Integer recipeNetId, // CraftRecipe/CraftRecipeAuto/CraftRecipeOptional/CraftRepairAndDisenchant
+        Integer timesCrafted, // CraftRecipe/CraftRecipeAuto/CraftCreative/CraftRepairAndDisenchant/CraftLoom
+        Integer creativeItemNetId, // CraftCreative
+        Integer filteredStringIndex, // CraftRecipeOptional (index into the request's filter strings, little endian int)
+        Integer repairCost, // CraftRepairAndDisenchant
+        String patternId, // CraftLoom
+        Integer hotbarSlot, // ScreenHUDMineBlock
+        Integer predictedDurability, // ScreenHUDMineBlock
+        Integer mineStackNetworkId // ScreenHUDMineBlock (little endian int)
 ) {
 
     public static ItemStackRequestAction take(final int amount, final ItemStackRequestSlot source, final ItemStackRequestSlot destination) {
-        return new ItemStackRequestAction(ItemStackRequestActionType.Take, amount, source, destination, null, null, null, null, null, null, null);
+        return new ItemStackRequestAction(ItemStackRequestActionType.Take, amount, source, destination, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     public static ItemStackRequestAction place(final int amount, final ItemStackRequestSlot source, final ItemStackRequestSlot destination) {
-        return new ItemStackRequestAction(ItemStackRequestActionType.Place, amount, source, destination, null, null, null, null, null, null, null);
+        return new ItemStackRequestAction(ItemStackRequestActionType.Place, amount, source, destination, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     public static ItemStackRequestAction swap(final ItemStackRequestSlot source, final ItemStackRequestSlot destination) {
-        return new ItemStackRequestAction(ItemStackRequestActionType.Swap, null, source, destination, null, null, null, null, null, null, null);
+        return new ItemStackRequestAction(ItemStackRequestActionType.Swap, null, source, destination, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     public static ItemStackRequestAction drop(final int amount, final ItemStackRequestSlot source, final boolean throwRandomly) {
-        return new ItemStackRequestAction(ItemStackRequestActionType.Drop, amount, source, null, throwRandomly, null, null, null, null, null, null);
+        return new ItemStackRequestAction(ItemStackRequestActionType.Drop, amount, source, null, throwRandomly, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     public static ItemStackRequestAction destroy(final int amount, final ItemStackRequestSlot source) {
-        return new ItemStackRequestAction(ItemStackRequestActionType.Destroy, amount, source, null, null, null, null, null, null, null, null);
+        return new ItemStackRequestAction(ItemStackRequestActionType.Destroy, amount, source, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     public static ItemStackRequestAction consume(final int amount, final ItemStackRequestSlot source) {
-        return new ItemStackRequestAction(ItemStackRequestActionType.Consume, amount, source, null, null, null, null, null, null, null, null);
+        return new ItemStackRequestAction(ItemStackRequestActionType.Consume, amount, source, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
-    public static ItemStackRequestAction create(final String resultItemId) {
-        return new ItemStackRequestAction(ItemStackRequestActionType.Create, null, null, null, null, resultItemId, null, null, null, null, null);
+    public static ItemStackRequestAction create(final int createSlot) {
+        return new ItemStackRequestAction(ItemStackRequestActionType.Create, null, null, null, null, createSlot, null, null, null, null, null, null, null, null, null, null, null);
     }
 
-    public static ItemStackRequestAction craftRecipe(final int recipeNetId) {
-        return new ItemStackRequestAction(ItemStackRequestActionType.CraftRecipe, null, null, null, null, null, null, null, recipeNetId, null, null);
+    public static ItemStackRequestAction craftRecipe(final int recipeNetId, final int timesCrafted) {
+        return new ItemStackRequestAction(ItemStackRequestActionType.CraftRecipe, null, null, null, null, null, null, null, recipeNetId, timesCrafted, null, null, null, null, null, null, null);
     }
 
-    public static ItemStackRequestAction craftRecipeAuto(final int recipeNetId, final int timesCrafted) {
-        return new ItemStackRequestAction(ItemStackRequestActionType.CraftRecipeAuto, null, null, null, null, null, null, null, recipeNetId, timesCrafted, null);
-    }
-
-    public static ItemStackRequestAction craftCreative(final ItemStackRequestSlot source) {
-        return new ItemStackRequestAction(ItemStackRequestActionType.CraftCreative, null, source, null, null, null, null, null, null, null, null);
-    }
-
-    public static ItemStackRequestAction craftRecipeOptional(final int recipeNetId, final int timesCrafted, final String filteredString) {
-        return new ItemStackRequestAction(ItemStackRequestActionType.CraftRecipeOptional, null, null, null, null, null, null, null, recipeNetId, timesCrafted, filteredString);
+    public static ItemStackRequestAction craftCreative(final int creativeItemNetId, final int timesCrafted) {
+        return new ItemStackRequestAction(ItemStackRequestActionType.CraftCreative, null, null, null, null, null, null, null, null, timesCrafted, creativeItemNetId, null, null, null, null, null, null);
     }
 
     public static ItemStackRequestAction screenBeaconPayment(final int primaryEffect, final int secondaryEffect) {
-        return new ItemStackRequestAction(ItemStackRequestActionType.ScreenBeaconPayment, null, null, null, null, null, primaryEffect, secondaryEffect, null, null, null);
+        return new ItemStackRequestAction(ItemStackRequestActionType.ScreenBeaconPayment, null, null, null, null, null, primaryEffect, secondaryEffect, null, null, null, null, null, null, null, null, null);
+    }
+
+    public static ItemStackRequestAction craftResultsDeprecated() {
+        return new ItemStackRequestAction(ItemStackRequestActionType.CraftResults, null, null, null, null, null, null, null, null, 0, null, null, null, null, null, null, null);
     }
 
 }

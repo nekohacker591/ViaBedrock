@@ -149,7 +149,44 @@ public class InventoryPackets {
             }
 
             if (response.result() == ItemStackResponse.RESULT_OK) {
-                // The server keeps the client in sync with follow-up inventory slot/content packets
+                // The response is the only authoritative sync for accepted requests: apply the returned
+                // net ids + amounts to the tracked containers (vanilla sends no follow-up inventory packets)
+                if (response.containers() != null) {
+                    final List<Container> changedContainers = new ArrayList<>();
+                    for (ItemStackResponse.Container responseContainer : response.containers()) {
+                        final Container container = resolveResponseContainer(wrapper.user(), inventoryTracker, responseContainer.containerName());
+                        if (container == null) {
+                            ViaBedrock.getPlatform().getLogger().log(Level.FINE, "Received item stack response for unknown container: " + responseContainer.containerName());
+                            continue;
+                        }
+                        for (ItemStackResponse.Slot responseSlot : responseContainer.slots()) {
+                            final int slotIndex = responseSlot.slot() & 0xFF; // The second slot field is the authoritative slot index
+                            final BedrockItem tracked = container.getItem(slotIndex);
+                            if (responseSlot.amount() <= 0 || (tracked.isEmpty() && responseSlot.serverNetId() == 0)) {
+                                if (!tracked.isEmpty()) {
+                                    container.setItem(slotIndex, BedrockItem.empty());
+                                    if (!changedContainers.contains(container)) {
+                                        changedContainers.add(container);
+                                    }
+                                }
+                                continue;
+                            }
+                            if (tracked.isEmpty()) {
+                                continue; // Can't reconcile an item we don't track
+                            }
+                            final BedrockItem updated = tracked.copy();
+                            updated.setAmount(responseSlot.amount());
+                            updated.setNetId(responseSlot.serverNetId() > 0 ? responseSlot.serverNetId() : tracked.netId());
+                            container.setItem(slotIndex, updated);
+                            if (!changedContainers.contains(container)) {
+                                changedContainers.add(container);
+                            }
+                        }
+                    }
+                    for (Container container : changedContainers) {
+                        PacketFactory.sendJavaContainerSetContent(wrapper.user(), container);
+                    }
+                }
                 return;
             }
 
@@ -174,19 +211,27 @@ public class InventoryPackets {
                 return;
             }
 
-            // Map Bedrock container data properties to Java container data ids
+            // Map Bedrock container data properties to Java container data ids. The property ids are
+            // overloaded per container type (brewing and furnace use 0-2 differently)
             final int javaId;
-            switch (id) {
-                case 0 -> javaId = 0; // Brew time -> brewing: brew time
-                case 1 -> javaId = 1; // Brew fuel amount -> brewing: fuel amount
-                case 2 -> javaId = 2; // Brew fuel total -> brewing: fuel total
-                case 3 -> javaId = 2; // Furnace tick count -> furnace: cook progress
-                case 4 -> javaId = 0; // Furnace fuel burn time -> furnace: burn time
-                default -> {
-                    ViaBedrock.getPlatform().getLogger().log(Level.FINE, "Unknown container data property: " + id);
-                    wrapper.cancel();
-                    return;
-                }
+            switch (container.type()) {
+                case BREWING_STAND -> javaId = switch (id) {
+                    case 0 -> 0; // Brew time -> Java: brew time
+                    case 1 -> 1; // Brew fuel amount -> Java: fuel
+                    default -> -1; // Fuel total is not synced by the Java client
+                };
+                case FURNACE, BLAST_FURNACE, SMOKER -> javaId = switch (id) {
+                    case 0 -> 2; // Furnace tick count -> Java: cooking progress
+                    case 1 -> 0; // Furnace lit time -> Java: lit time remaining
+                    case 2 -> 1; // Furnace lit duration -> Java: lit duration
+                    default -> -1; // Stored XP / fuel aux are not synced by the Java client
+                };
+                default -> javaId = -1;
+            }
+            if (javaId == -1) {
+                ViaBedrock.getPlatform().getLogger().log(Level.FINE, "Dropping container data property " + id + " for " + container.type());
+                wrapper.cancel();
+                return;
             }
 
             wrapper.write(Types.VAR_INT, (int) container.javaContainerId()); // container id
@@ -612,13 +657,17 @@ public class InventoryPackets {
                 // Translate to a craft creative request using the creative content cache
                 final int creativeIndex = inventoryTracker.findCreativeItemIndex(wrapper.user().get(ItemRewriter.class), item);
                 if (creativeIndex != -1) {
-                    final ItemStackRequestSlot source = new ItemStackRequestSlot(new FullContainerName(ContainerEnumName.CreatedOutputContainer, 0), (byte) 0, inventoryTracker.getCreativeItemNetId(creativeIndex));
+                    final int creativeNetId = inventoryTracker.getCreativeItemNetId(creativeIndex);
                     final ItemStackRequestSlot destination = inventoryRequestSlot(inventoryTracker, slot & 0xFFFF);
                     if (destination != null) {
                         final int amount = Math.max(1, item.amount());
+                        // The crafted item materializes in the created output container; its net id is unknown until the server responds
+                        final ItemStackRequestSlot createdOutput = new ItemStackRequestSlot(new FullContainerName(ContainerEnumName.CreatedOutputContainer, null), (byte) 0, 0);
                         final ItemStackRequest request = new ItemStackRequest(inventoryTracker.nextItemStackRequestId(), List.of(
-                                ItemStackRequestAction.craftCreative(source),
-                                ItemStackRequestAction.take(amount, source, destination)
+                                ItemStackRequestAction.craftCreative(creativeNetId, 1),
+                                // Vanilla clients acknowledge the craft with an empty deprecated craft results action
+                                ItemStackRequestAction.craftResultsDeprecated(),
+                                ItemStackRequestAction.take(amount, createdOutput, destination)
                         ), new ArrayList<>(), 0);
                         final PacketWrapper requestPacket = PacketWrapper.create(ServerboundBedrockPackets.ITEM_STACK_REQUEST, wrapper.user());
                         requestPacket.write(BedrockTypes.ITEM_STACK_REQUEST, request);
@@ -807,9 +856,9 @@ public class InventoryPackets {
                     return null;
                 }
                 if (button >= 0 && button <= 8) {
-                    return List.of(ItemStackRequestAction.swap(source, combinedSlot(button, inventoryTracker.getInventoryContainer().getItem(button))));
+                    return List.of(ItemStackRequestAction.swap(source, hotbarRequestSlot(button, inventoryTracker.getInventoryContainer().getItem(button))));
                 } else if (button == 40) {
-                    return List.of(ItemStackRequestAction.swap(source, new ItemStackRequestSlot(new FullContainerName(ContainerEnumName.OffhandContainer, 0), (byte) 0, netIdOf(inventoryTracker.getOffhandContainer().getItem(0)))));
+                    return List.of(ItemStackRequestAction.swap(source, new ItemStackRequestSlot(new FullContainerName(ContainerEnumName.OffhandContainer, null), (byte) 1, netIdOf(inventoryTracker.getOffhandContainer().getItem(0)))));
                 }
                 return null;
             }
@@ -839,19 +888,41 @@ public class InventoryPackets {
     }
 
     /**
+     * Resolves a container from a response FullContainerName to the tracked container.
+     */
+    private static Container resolveResponseContainer(final UserConnection user, final InventoryTracker inventoryTracker, final FullContainerName containerName) {
+        if (containerName == null) {
+            return null;
+        }
+        return switch (containerName.name()) {
+            case InventoryContainer, HotbarContainer, CombinedHotbarAndInventoryContainer -> inventoryTracker.getInventoryContainer();
+            case CursorContainer -> inventoryTracker.getHudContainer();
+            case LevelEntityContainer, CrafterLevelEntityContainer -> inventoryTracker.getCurrentContainer();
+            default -> {
+                // Per-type container names (anvil input, furnace fuel, ...) all address the open container
+                final Container currentContainer = inventoryTracker.getCurrentContainer();
+                yield currentContainer != null ? currentContainer : inventoryTracker.getContainerClientbound((byte) ContainerID.CONTAINER_ID_REGISTRY.getValue(), containerName, null);
+            }
+        };
+    }
+
+    /**
      * Java player inventory slot -> Bedrock item stack request slot info.
+     * Container names follow the vanilla client: INVENTORY for the main inventory, HOTBAR for the hotbar.
      */
     private static ItemStackRequestSlot inventoryRequestSlot(final InventoryTracker inventoryTracker, final int javaSlot) {
         if (javaSlot >= 9 && javaSlot <= 35) {
-            return combinedSlot(javaSlot, inventoryTracker.getInventoryContainer().getItem(javaSlot));
+            return new ItemStackRequestSlot(new FullContainerName(ContainerEnumName.InventoryContainer, null), (byte) javaSlot, netIdOf(inventoryTracker.getInventoryContainer().getItem(javaSlot)));
         } else if (javaSlot >= 36 && javaSlot <= 44) {
-            return combinedSlot(javaSlot - 36, inventoryTracker.getInventoryContainer().getItem(javaSlot - 36));
+            return new ItemStackRequestSlot(new FullContainerName(ContainerEnumName.HotbarContainer, null), (byte) (javaSlot - 36), netIdOf(inventoryTracker.getInventoryContainer().getItem(javaSlot - 36)));
         } else if (javaSlot >= 5 && javaSlot <= 8) {
-            return new ItemStackRequestSlot(new FullContainerName(ContainerEnumName.ArmorContainer, 0), (byte) (javaSlot - 5), netIdOf(inventoryTracker.getArmorContainer().getItem(javaSlot - 5)));
+            return new ItemStackRequestSlot(new FullContainerName(ContainerEnumName.ArmorContainer, null), (byte) (javaSlot - 5), netIdOf(inventoryTracker.getArmorContainer().getItem(javaSlot - 5)));
         } else if (javaSlot == 45) {
-            return new ItemStackRequestSlot(new FullContainerName(ContainerEnumName.OffhandContainer, 0), (byte) 0, netIdOf(inventoryTracker.getOffhandContainer().getItem(0)));
+            // The vanilla client sends slot 1 for the offhand (a known client quirk since 1.19.70)
+            return new ItemStackRequestSlot(new FullContainerName(ContainerEnumName.OffhandContainer, null), (byte) 1, netIdOf(inventoryTracker.getOffhandContainer().getItem(0)));
         } else if (javaSlot >= 1 && javaSlot <= 4) {
-            return new ItemStackRequestSlot(new FullContainerName(ContainerEnumName.CraftingInputContainer, 0), (byte) (javaSlot - 1), netIdOf(inventoryTracker.getHudContainer().getItem(28 + javaSlot - 1)));
+            // The vanilla client uses the UI slot offsets 28-31 for the 2x2 crafting input
+            return new ItemStackRequestSlot(new FullContainerName(ContainerEnumName.CraftingInputContainer, null), (byte) (28 + javaSlot - 1), netIdOf(inventoryTracker.getHudContainer().getItem(28 + javaSlot - 1)));
         }
         return null; // Crafting result slot and unknown slots
     }
@@ -866,15 +937,15 @@ public class InventoryPackets {
         if (bedrockSlot < 0 || bedrockSlot >= container.size()) {
             return null;
         }
-        return new ItemStackRequestSlot(new FullContainerName(containerName, 0), (byte) bedrockSlot, netIdOf(container.getItem(bedrockSlot)));
+        return new ItemStackRequestSlot(new FullContainerName(containerName, null), (byte) bedrockSlot, netIdOf(container.getItem(bedrockSlot)));
     }
 
     private static ItemStackRequestSlot cursorSlot(final InventoryTracker inventoryTracker) {
-        return new ItemStackRequestSlot(new FullContainerName(ContainerEnumName.CursorContainer, 0), (byte) 0, netIdOf(inventoryTracker.getHudContainer().getItem(0)));
+        return new ItemStackRequestSlot(new FullContainerName(ContainerEnumName.CursorContainer, null), (byte) 0, netIdOf(inventoryTracker.getHudContainer().getItem(0)));
     }
 
-    private static ItemStackRequestSlot combinedSlot(final int bedrockSlot, final BedrockItem item) {
-        return new ItemStackRequestSlot(new FullContainerName(ContainerEnumName.CombinedHotbarAndInventoryContainer, 0), (byte) bedrockSlot, netIdOf(item));
+    private static ItemStackRequestSlot hotbarRequestSlot(final int hotbarSlot, final BedrockItem item) {
+        return new ItemStackRequestSlot(new FullContainerName(ContainerEnumName.HotbarContainer, null), (byte) hotbarSlot, netIdOf(item));
     }
 
     private static int netIdOf(final BedrockItem item) {

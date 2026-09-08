@@ -21,17 +21,9 @@ import net.raphimc.viabedrock.protocol.model.FullContainerName;
 
 /**
  * Slot info inside an item stack request action.
- * A netId of 0 means "no item stack net id" (empty slot).
+ * The stack network id is written as a little endian int; 0 means "no net id".
  */
 public record ItemStackRequestSlot(FullContainerName containerName, byte slot, int netId) {
-
-    /**
-     * The netId variant is written as (netId << 1) | 1 for the latest item stack version,
-     * or 0 when there is no net id.
-     */
-    public int netIdVariant() {
-        return this.netId == 0 ? 0 : (this.netId << 1) | 1;
-    }
 
     public static ItemStackRequestSlot of(final FullContainerName containerName, final int slot, final int netId) {
         return new ItemStackRequestSlot(containerName, (byte) slot, netId);
