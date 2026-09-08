@@ -15,10 +15,20 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-package net.raphimc.viabedrock.experimental.model.inventory;
+package net.raphimc.viabedrock.protocol.model.inventory;
 
-import net.raphimc.viabedrock.protocol.data.enums.bedrock.generated.InventorySourceType;
-import net.raphimc.viabedrock.protocol.data.enums.bedrock.generated.InventorySource_InventorySourceFlags;
+import net.raphimc.viabedrock.protocol.model.FullContainerName;
 
-public record InventorySource(InventorySourceType type, int containerId, InventorySource_InventorySourceFlags flags) {
+import java.util.List;
+
+public record ItemStackResponse(int result, int requestId, List<Container> containers) {
+
+    public static final int RESULT_OK = 0;
+
+    public record Container(FullContainerName containerName, List<Slot> slots) {
+    }
+
+    public record Slot(byte requestedSlot, byte slot, byte amount, int serverNetId, String customName, String filteredCustomName, int durabilityCorrection) {
+    }
+
 }
