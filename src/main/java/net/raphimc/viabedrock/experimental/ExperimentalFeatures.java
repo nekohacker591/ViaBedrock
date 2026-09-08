@@ -19,7 +19,6 @@ package net.raphimc.viabedrock.experimental;
 
 import com.viaversion.viaversion.api.connection.UserConnection;
 import com.viaversion.viaversion.api.minecraft.BlockPosition;
-import com.viaversion.viaversion.api.protocol.packet.PacketWrapper;
 import com.viaversion.viaversion.api.type.Types;
 import com.viaversion.viaversion.libs.fastutil.longs.LongArrayList;
 import com.viaversion.viaversion.libs.fastutil.longs.LongList;
