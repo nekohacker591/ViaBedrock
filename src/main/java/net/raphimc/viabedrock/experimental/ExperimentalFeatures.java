@@ -358,6 +358,11 @@ public class ExperimentalFeatures {
 
             final EntityLink linkType = wrapper.read(BedrockTypes.ENTITY_LINK);
             final Entity vehicle = entityTracker.getEntityByUid(linkType.fromEntityUniqueId());
+            if (vehicle == null) {
+                wrapper.cancel();
+                return;
+            }
+
             final Entity passenger = entityTracker.getEntityByUid(linkType.toEntityUniqueId());
 
             // TODO: Handle Passenger type if needed
