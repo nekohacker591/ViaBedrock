@@ -108,9 +108,11 @@ public class InventoryTransactionPacketType extends Type<BedrockInventoryTransac
         }
 
         BedrockTypes.VAR_INT.write(buffer, bedrockInventoryTransaction.legacyRequestId());
-        Types.BOOLEAN.write(buffer, bedrockInventoryTransaction.legacyRequestId() != 0);
-        if (bedrockInventoryTransaction.legacyRequestId() != 0) {
+        if (bedrockInventoryTransaction.legacyRequestId() < -1 && (bedrockInventoryTransaction.legacyRequestId() & 1) == 0) {
+            Types.BOOLEAN.write(buffer, true);
             BedrockTypes.LEGACY_SET_ITEM_SLOT_DATA.write(buffer, bedrockInventoryTransaction.legacySlots().toArray(new LegacySetItemSlotData[0]));
+        } else {
+            Types.BOOLEAN.write(buffer, false);
         }
 
         Types.BOOLEAN.write(buffer, true);

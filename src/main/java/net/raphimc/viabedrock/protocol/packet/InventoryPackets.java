@@ -98,6 +98,8 @@ public class InventoryPackets {
     private static final int DIALOG_BUTTON_WIDTH = 200;
     private static final int DIALOG_FAKE_BUTTON_WIDTH = 300;
     private static final String DIALOG_FAKE_BUTTON_TEXT = "This is not actually a button, but has to be one because dialogs don't support adding text only elements. Clicking it has the same effect as closing the dialog.";
+    // Fallback max stack size for merge predictions. Items with smaller stacks (e.g. ender pearls)
+    // get rejected by the server and fall back to a resync, which keeps the inventory consistent
     private static final int MAX_STACK_SIZE = 64;
 
     public static void register(final BedrockProtocol protocol) {
